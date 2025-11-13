@@ -69,6 +69,32 @@ Not currently deployed by Flask; adapt `DATASETS` mapping to add additional mode
 ### 4.4 Incremental Update Path
 Endpoint `/incremental/update` attempts to reuse the existing stored model, performing a `partial_fit` if supported (SGD fallback logic). RandomForest (sklearn) is not inherently incremental; switch to `SGDClassifier` or similar for fully online learning in a production scenario.
 
+### 4.5 Newly Added Boosted / Ensemble Tree Scripts
+The repository now includes additional training utilities for stronger tabular performance and model diversity:
+
+| Script | Algorithm | Key Parameters | Output Model (default) |
+|--------|-----------|----------------|------------------------|
+| `train/train_xgboost.py` | XGBoost (multi:softprob) | n_estimators=800, max_depth=7, lr=0.05, subsample=0.8 | `models/saved_model_xgboost.joblib` |
+| `train/train_gradient_boosting.py` | sklearn GradientBoosting | n_estimators=600, lr=0.05, max_depth=3 | `models/saved_model_gradient_boosting.joblib` |
+| `train/train_extratrees.py` | ExtraTreesClassifier | n_estimators=800, max_features=sqrt, class_weight balanced | `models/saved_model_extratrees.joblib` |
+
+All scripts:
+- Accept the same environment variables (`PRIMARY_DATA`, `SYNTH_DATA`, `OUTPUT_MODEL`, `MAX_ROWS`, `TEST_SIZE`).
+- Persist metrics to `models/metrics.json` under a key matching the output filename stem.
+- Re-use `feature_names.json` if already present (to maintain consistent ordering across models).
+
+Example (Windows CMD) to train XGBoost on UNSW selected features:
+```cmd
+set PRIMARY_DATA=unsw_selected_features.csv
+set OUTPUT_MODEL=saved_model_xgboost.joblib
+python train\train_xgboost.py
+```
+Then list models via API:
+```cmd
+curl http://localhost:5000/models
+```
+Add a model selection feature in the dashboard by referencing the new entries in `models/metrics.json`.
+
 ---
 ## 5. Label Mapping (UNSW-NB15)
 Current API `DATASETS` mapping (in `api/app.py`) uses:

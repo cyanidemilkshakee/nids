@@ -17,11 +17,64 @@
   <!-- Theme toggle & Toast container -->
   <div class="toast-container" id="toastContainer"></div>
 
+  <!-- SVG Icon Sprite (hidden) -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute; width:0; height:0; overflow:hidden" aria-hidden="true" focusable="false">
+    <symbol id="icon-shield" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12 2l7 3v6c0 5-3.5 9.7-7 11c-3.5-1.3-7-6-7-11V5l7-3z"/>
+    </symbol>
+    <symbol id="icon-robot" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M7 7V5h10v2h2a2 2 0 0 1 2 2v7h-2v3h-2v-3H9v3H7v-3H5V9a2 2 0 0 1 2-2h0zm2 0h6V5H9v2Zm-2 4a2 2 0 1 0 0-4a2 2 0 0 0 0 4Zm10 0a2 2 0 1 0 0-4a2 2 0 0 0 0 4Z"/>
+    </symbol>
+    <symbol id="icon-target" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M11 2h2v4h-2zM11 18h2v4h-2zM2 11h4v2H2zM18 11h4v2h-4z"/>
+      <circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="2"/>
+      <circle cx="12" cy="12" r="2" fill="currentColor"/>
+    </symbol>
+    <symbol id="icon-bolt" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M13 2L3 14h7v8l11-14h-8l0-6z"/>
+    </symbol>
+    <symbol id="icon-feedback" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M4 4h16v12H7l-3 3V4z"/>
+    </symbol>
+    <symbol id="icon-gear" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12 8a4 4 0 1 1 0 8a4 4 0 0 1 0-8zm9 4a7.9 7.9 0 0 0-.2-1.8l2.1-1.6l-2-3.5l-2.6.9A8 8 0 0 0 16 3.7L15.3 1h-6.6L8 3.7A8 8 0 0 0 5.7 6L3.1 5.1l-2 3.5l2.1 1.6A7.9 7.9 0 0 0 3 12c0 .6.1 1.2.2 1.8L1.1 15.4l2 3.5l2.6-.9A8 8 0 0 0 8 20.3L8.7 23h6.6l.7-2.7a8 8 0 0 0 2.3-2.3l2.6.9l2-3.5l-2.1-1.6c.1-.6.2-1.2.2-1.8z"/>
+    </symbol>
+    <symbol id="icon-crystal" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12 2l4 6l-4 14l-4-14l4-6z"/>
+    </symbol>
+    <symbol id="icon-scales" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M11 3h2v3h5l-4 7h-8L4 6h7V3zM6 17h12v2H6v-2z"/>
+    </symbol>
+    <symbol id="icon-brain" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M7 4a3 3 0 0 0-3 3v6a4 4 0 0 0 4 4h1V6a2 2 0 0 0-2-2zm10 0a2 2 0 0 0-2 2v11h1a4 4 0 0 0 4-4V7a3 3 0 0 0-3-3z"/>
+    </symbol>
+    <symbol id="icon-tag" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M10 3l9 9l-7 7l-9-9V3h7zm-3 5a2 2 0 1 0 0-4a2 2 0 0 0 0 4z"/>
+    </symbol>
+    <symbol id="icon-model" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M4 4h16v6H4V4zm0 8h16v8H4v-8z"/>
+    </symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9z"/>
+    </symbol>
+    <symbol id="icon-send" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M2 21l21-9L2 3v7l15 2L2 14v7z"/>
+    </symbol>
+    <symbol id="icon-update" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12 6V3L8 7l4 4V8c2.8 0 5 2.2 5 5a5 5 0 0 1-9.8 1H5.1A7 7 0 1 0 12 6z"/>
+    </symbol>
+  </svg>
+
   <!-- Header -->
   <header class="app-header" id="appHeader">
     <div class="header-content">
       <div class="brand">
-        <div class="logo" role="img" aria-label="Shield icon">🛡️</div>
+        <div class="logo" aria-hidden="true">
+          <svg class="icon" width="28" height="28" aria-hidden="true"><use href="#icon-shield"/></svg>
+        </div>
         <div class="brand-text">
           <h1>AI Network IDS</h1>
           <p class="subtitle">Machine learning powered Network Intrusion Detection System</p>
@@ -44,7 +97,7 @@
       <section class="card">
         <div class="card-header">
           <h2 class="card-title">
-            <span class="card-title-icon" role="img" aria-label="Robot icon">🤖</span>
+            <span class="card-title-icon" aria-hidden="true"><svg class="icon" width="20" height="20"><use href="#icon-robot"/></svg></span>
             Model Management
           </h2>
         </div>
@@ -65,12 +118,12 @@
           </div>
           <div class="field">
             <button id="loadModelsBtn" class="btn btn-primary">
-              <span role="img" aria-label="Load icon">⚡</span>
-              Initialize & Load Models
+              <span aria-hidden="true"><svg class="icon" width="16" height="16"><use href="#icon-bolt"/></svg></span>
+              Load models
             </button>
           </div>
-          <div class="text-sm text-muted" id="modelStatus" role="status">Ready to load models...</div>
-          <div class="text-sm text-muted" id="featureCount" role="status" style="margin-top: var(--space-2);">—</div>
+          <div class="text-sm text-muted" id="modelStatus" role="status">Dataset: — • Models: —</div>
+          <div class="text-sm text-muted" id="featureCount" role="status" style="margin-top: var(--space-2);">Features: —</div>
         </div>
       </section>
 
@@ -78,40 +131,12 @@
       <section class="card">
         <div class="card-header">
           <h2 class="card-title">
-            <span class="card-title-icon" role="img" aria-label="Template icon">🎯</span>
+            <span class="card-title-icon" aria-hidden="true"><svg class="icon" width="20" height="20"><use href="#icon-target"/></svg></span>
             Quick Presets
           </h2>
         </div>
         <div class="card-content">
-          <div class="chip-group">
-            <button id="presetRandom" class="chip">
-              <span role="img" aria-label="Dice icon">🎲</span>
-              Random Sample
-            </button>
-          </div>
-          <div id="presetThreats" class="chip-group" style="margin-top: var(--space-4);"></div>
-        </div>
-      </section>
-
-      <!-- Actions -->
-      <section class="card">
-        <div class="card-header">
-          <h2 class="card-title">
-            <span class="card-title-icon" role="img" aria-label="Action icon">⚡</span>
-            Actions
-          </h2>
-        </div>
-        <div class="card-content">
-          <div class="flex flex-col gap-3">
-            <button id="predictBtn" class="btn btn-primary" disabled>
-              <span role="img" aria-label="Predict icon">🔮</span>
-              Predict
-            </button>
-            <button id="clearBtn" class="btn" disabled>
-              <span role="img" aria-label="Clear icon">🗑️</span>
-              Clear Form
-            </button>
-          </div>
+          <div id="presetThreats" class="chip-group"></div>
         </div>
       </section>
 
@@ -119,7 +144,7 @@
       <section class="card">
         <div class="card-header">
           <h2 class="card-title">
-            <span class="card-title-icon" role="img" aria-label="Feedback icon">💬</span>
+            <span class="card-title-icon" aria-hidden="true"><svg class="icon" width="20" height="20"><use href="#icon-feedback"/></svg></span>
             Model Feedback
           </h2>
         </div>
@@ -133,7 +158,7 @@
             </select>
           </div>
           <button id="sendFeedback" class="btn btn-success" disabled>
-            <span role="img" aria-label="Send icon">📤</span>
+            <span aria-hidden="true"><svg class="icon" width="16" height="16"><use href="#icon-send"/></svg></span>
             Send Feedback
           </button>
           <div class="text-sm text-muted" id="feedbackStatus" role="status" style="margin-top: var(--space-2);">—</div>
@@ -147,12 +172,30 @@
       <div class="card card-features-condensed">
         <div class="card-header">
           <h2 class="card-title">
-            <span class="card-title-icon" role="img" aria-label="Input icon">⚙️</span>
+            <span class="card-title-icon" aria-hidden="true"><svg class="icon" width="20" height="20"><use href="#icon-gear"/></svg></span>
             Feature Inputs
           </h2>
         </div>
         <div class="card-content features-form-wrapper">
           <div id="featuresForm" class="grid grid-features-compact"></div>
+        </div>
+        <div class="card-footer" id="featureActions" style="display: none;">
+          <div class="flex" style="justify-content: space-between; align-items: center;">
+            <div class="flex gap-3">
+              <button id="predictBtn" class="btn btn-primary" disabled>
+                <span aria-hidden="true"><svg class="icon" width="16" height="16"><use href="#icon-crystal"/></svg></span>
+                Predict
+              </button>
+              <button id="clearBtn" class="btn btn-transparent" disabled>
+                <span aria-hidden="true"><svg class="icon" width="16" height="16"><use href="#icon-trash"/></svg></span>
+                Clear Form
+              </button>
+            </div>
+            <button id="predictAllBtn" class="btn btn-outline-primary" disabled>
+              <span aria-hidden="true"><svg class="icon" width="16" height="16"><use href="#icon-scales"/></svg></span>
+              Compare All Models
+            </button>
+          </div>
         </div>
       </div>
 
@@ -163,31 +206,37 @@
           <div class="card">
             <div class="card-header">
               <h2 class="card-title">
-                <span class="card-title-icon" role="img" aria-label="Crystal ball icon">🔮</span>
+                <span class="card-title-icon" aria-hidden="true"><svg class="icon" width="20" height="20"><use href="#icon-crystal"/></svg></span>
                 Prediction Results
               </h2>
             </div>
             <div class="card-content">
+              <!-- Available Labels Display -->
+              <div class="labels-section" style="margin-bottom: var(--space-4); padding-bottom: var(--space-4); border-bottom: 1px solid var(--color-border-subtle);">
+                <h3 class="prediction-label" style="margin-bottom: var(--space-2);">Available Labels:</h3>
+                <div id="labels" class="labels-container"></div>
+              </div>
+              
               <div class="prediction-grid">
+                <div class="prediction-row attack-priority">
+                  <span class="prediction-label">Attack Detected:</span>
+                  <span id="predAttack" class="prediction-value">Not available yet</span>
+                </div>
                 <div class="prediction-row">
                   <span class="prediction-label">Predicted Class:</span>
-                  <span id="predClass" class="prediction-value">—</span>
+                  <span id="predClass" class="prediction-value">No prediction yet. Enter features or apply a preset, then click Predict.</span>
                 </div>
                 <div class="prediction-row">
                   <span class="prediction-label">Threat Type:</span>
-                  <span id="predThreat" class="prediction-value">—</span>
+                  <span id="predThreat" class="prediction-value">Not available yet</span>
                 </div>
                 <div class="prediction-row">
                   <span class="prediction-label">Confidence:</span>
-                  <span id="predConfidence" class="prediction-value">—</span>
-                </div>
-                <div class="prediction-row">
-                  <span class="prediction-label">Attack Detected:</span>
-                  <span id="predAttack" class="prediction-value">—</span>
+                  <span id="predConfidence" class="prediction-value">Not available yet</span>
                 </div>
                 <div class="prediction-row">
                   <span class="prediction-label">Model Type:</span>
-                  <span id="predModel" class="prediction-value">—</span>
+                  <span id="predModel" class="prediction-value">Not available yet</span>
                 </div>
               </div>
               <div id="predError" class="text-sm" style="color: var(--color-danger); margin-top: var(--space-3);"></div>
@@ -200,11 +249,29 @@
             </div>
           </div>
 
+          <!-- Model Comparison Results -->
+          <div class="card card-compare">
+            <div class="card-header">
+              <h2 class="card-title">
+                <span class="card-title-icon" aria-hidden="true"><svg class="icon" width="20" height="20"><use href="#icon-scales"/></svg></span>
+                Model Comparison
+              </h2>
+              <div class="card-actions">
+                <span id="comparisonSpinner" class="spinner" aria-live="polite" aria-busy="false" title="Waiting to compare"></span>
+              </div>
+            </div>
+            <div class="card-content">
+              <div id="modelComparison" class="model-comparison-grid">
+                <div class="text-center text-muted">Run "Compare All Models" to see results</div>
+              </div>
+            </div>
+          </div>
+
           <!-- Model Explanation -->
           <div class="card">
             <div class="card-header">
               <h2 class="card-title">
-                <span class="card-title-icon" role="img" aria-label="Explain icon">🧠</span>
+                <span class="card-title-icon" aria-hidden="true"><svg class="icon" width="20" height="20"><use href="#icon-brain"/></svg></span>
                 Model Explainability
               </h2>
             </div>
@@ -212,11 +279,10 @@
               <div class="btn-group">
                 <button id="explainShap" class="btn">SHAP Analysis</button>
                 <button id="explainLime" class="btn">LIME Local</button>
-                <button id="incUpdate" class="btn">Update Model</button>
+                <button id="incUpdate" class="btn"><span aria-hidden="true"><svg class="icon" width="16" height="16"><use href="#icon-update"/></svg></span> Update Model</button>
               </div>
-              <div class="explanation-status" id="incStatus">—</div>
               <div class="explanation-container">
-                <div id="explanationOut" class="explanation-output">—</div>
+                <div id="explanationOut" class="explanation-output">No explanation yet. Make a prediction first.</div>
               </div>
             </div>
           </div>
@@ -225,24 +291,11 @@
 
       <!-- Investigation Panel -->
       <div class="investigation-panel">
-        <!-- Labels Section -->
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">
-              <span class="card-title-icon" role="img" aria-label="Tag icon">🏷️</span>
-              Available Labels
-            </h2>
-          </div>
-          <div class="card-content">
-            <div id="labels" class="labels-container"></div>
-          </div>
-        </div>
-
         <!-- Available Models -->
         <div class="card">
           <div class="card-header">
             <h2 class="card-title">
-              <span class="card-title-icon" role="img" aria-label="Models icon">🤖</span>
+              <span class="card-title-icon" aria-hidden="true"><svg class="icon" width="20" height="20"><use href="#icon-model"/></svg></span>
               Trained ML Models
             </h2>
           </div>
@@ -260,7 +313,7 @@
       <div class="slide-panel-header">
         <h3 class="slide-panel-title" id="slidePanelTitle">Alert Details</h3>
         <button class="slide-panel-close" id="slidePanelClose" aria-label="Close panel">
-          <span role="img" aria-label="Close icon">✖️</span>
+          <span aria-hidden="true"><svg class="icon" width="16" height="16"><use href="#icon-close"/></svg></span>
         </button>
       </div>
       <div class="slide-panel-tabs">

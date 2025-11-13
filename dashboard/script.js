@@ -15,6 +15,7 @@ function initializeElements() {
     featureCount: 'featureCount',
     featuresForm: 'featuresForm',
     predictBtn: 'predictBtn',
+    predictAllBtn: 'predictAllBtn',
     clearBtn: 'clearBtn',
     
     // Prediction display
@@ -31,7 +32,6 @@ function initializeElements() {
     feedbackLabel: 'feedbackLabel',
     sendFeedback: 'sendFeedback',
     feedbackStatus: 'feedbackStatus',
-    presetRandom: 'presetRandom',
     presetThreats: 'presetThreats',
     
     // Analytics
@@ -39,7 +39,6 @@ function initializeElements() {
     explainLime: 'explainLime',
     explanationOut: 'explanationOut',
     incUpdate: 'incUpdate',
-    incStatus: 'incStatus',
     
     // New UI elements
     themeToggle: 'themeToggle',
@@ -50,6 +49,9 @@ function initializeElements() {
     slidePanelClose: 'slidePanelClose',
     slidePanelTitle: 'slidePanelTitle',
     slidePanelContent: 'slidePanelContent',
+    
+    // Model comparison
+    modelComparison: 'modelComparison',
     
   // Model & dataset selectors
   modelSelectSecondary: 'modelSelectSecondary',
@@ -78,6 +80,84 @@ let animationStagger = 0;
 let availableModels = [];
 // Toast suppression flag per user request
 const DISABLE_TOASTS = true;
+
+// Debounce state for Compare All Models
+let comparePending = false;
+let compareTimer = null;
+
+// Prediction Results placeholder control
+function ensurePredictionPlaceholder() {
+  // Create placeholder if it doesn't exist
+  let ph = document.getElementById('predPlaceholder');
+  if (!ph) {
+    ph = document.createElement('div');
+    ph.id = 'predPlaceholder';
+    ph.className = 'text-sm text-muted';
+    ph.style.marginTop = '8px';
+    ph.textContent = 'Enter features or apply a preset,to predict the attack';
+    const grid = document.querySelector('.prediction-grid');
+    if (grid && grid.parentElement) {
+      grid.parentElement.insertBefore(ph, grid);
+    }
+  }
+  return ph;
+}
+
+function showPredictionPlaceholder() {
+  const grid = document.querySelector('.prediction-grid');
+  const probs = document.querySelector('.probabilities-section');
+  const error = els.predError;
+  const ph = ensurePredictionPlaceholder();
+  if (grid) grid.style.display = 'none';
+  if (probs) probs.style.display = 'none';
+  if (error) error.style.display = 'none';
+  if (ph) ph.style.display = '';
+}
+
+function showResultsSections() {
+  const grid = document.querySelector('.prediction-grid');
+  const probs = document.querySelector('.probabilities-section');
+  const error = els.predError;
+  const ph = document.getElementById('predPlaceholder');
+  if (ph) ph.style.display = 'none';
+  if (grid) grid.style.display = '';
+  if (probs) probs.style.display = '';
+  if (error) error.style.display = '';
+}
+
+function hidePredictionPlaceholder() {
+  const ph = document.getElementById('predPlaceholder');
+  if (ph) ph.style.display = 'none';
+}
+
+// Feature Inputs placeholder control
+function ensureFeaturesPlaceholder() {
+  let ph = document.getElementById('featuresPlaceholder');
+  if (!ph) {
+    ph = document.createElement('div');
+    ph.id = 'featuresPlaceholder';
+    ph.className = 'text-sm text-muted';
+    ph.style.padding = '8px 0';
+    ph.textContent = 'Load models to show the features';
+    const wrapper = document.querySelector('.features-form-wrapper');
+    if (wrapper) {
+      wrapper.insertBefore(ph, wrapper.firstChild);
+    }
+  }
+  return ph;
+}
+
+function showFeaturesPlaceholder() {
+  const ph = ensureFeaturesPlaceholder();
+  if (els.featuresForm) els.featuresForm.style.display = 'none';
+  if (ph) ph.style.display = '';
+}
+
+function hideFeaturesPlaceholder() {
+  const ph = document.getElementById('featuresPlaceholder');
+  if (ph) ph.style.display = 'none';
+  if (els.featuresForm) els.featuresForm.style.display = '';
+}
 
 // Toast notification system
 class ToastManager {
@@ -154,13 +234,36 @@ const toast = new ToastManager();
 
 // Theme management
 function initTheme() {
-  document.documentElement.setAttribute('data-theme', currentTheme);
+  // Get theme from localStorage or detect system preference
+  let preferredTheme = localStorage.getItem('theme');
+  if (!preferredTheme) {
+    preferredTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  
+  currentTheme = preferredTheme;
+  applyTheme(currentTheme);
   updateThemeToggle();
+  
+  // Listen for system theme changes
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+    if (!localStorage.getItem('theme')) {
+      // Only follow system preference if user hasn't manually set a theme
+      currentTheme = e.matches ? 'dark' : 'light';
+      applyTheme(currentTheme);
+      updateThemeToggle();
+    }
+  });
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  // Also add/remove class for additional CSS targeting if needed
+  document.body.classList.toggle('dark-theme', theme === 'dark');
 }
 
 function toggleTheme() {
   currentTheme = currentTheme === 'light' ? 'dark' : 'light';
-  document.documentElement.setAttribute('data-theme', currentTheme);
+  applyTheme(currentTheme);
   localStorage.setItem('theme', currentTheme);
   updateThemeToggle();
   toast.info('Theme Changed', `Switched to ${currentTheme} mode`);
@@ -170,8 +273,8 @@ function updateThemeToggle() {
   const toggle = els.themeToggle;
   if (toggle) {
     toggle.setAttribute('aria-label', `Switch to ${currentTheme === 'light' ? 'dark' : 'light'} mode`);
-  // Provide visual icon inside toggle for clarity
-  toggle.innerHTML = currentTheme === 'light' ? '🌞' : '🌙';
+    toggle.setAttribute('title', `Switch to ${currentTheme === 'light' ? 'dark' : 'light'} mode`);
+    // Icon/knob is handled purely via CSS ::before
   }
 }
 
@@ -251,8 +354,8 @@ async function pingApi() {
     
     if (data.status === 'online') {
       updateApiStatus('online', `Online`);
-      // Don't auto-load anymore - user will click button
-      console.log('API ready - click "Initialize & Load Models" to begin');
+  // Don't auto-load anymore - user will click button
+  console.log('API ready - click "Load models" to begin');
     } else {
       updateApiStatus('warning', 'API Error');
     }
@@ -291,11 +394,11 @@ async function initializeModels() {
   try {
     if (els.loadModelsBtn) {
       els.loadModelsBtn.disabled = true;
-      els.loadModelsBtn.innerHTML = '<span role="img" aria-label="Loading">⏳</span> Loading...';
+      els.loadModelsBtn.innerHTML = 'Loading...';
     }
     
     if (els.modelStatus) {
-      els.modelStatus.textContent = 'Initializing models and dataset...';
+      els.modelStatus.textContent = 'Initializing...';
     }
     
   const data = await apiCall(`${API_BASE}/initialize`, { method: 'POST' });
@@ -307,11 +410,11 @@ async function initializeModels() {
       
       // Update UI
       if (els.modelStatus) {
-        els.modelStatus.textContent = `✅ Loaded ${data.models.length} models with ${data.default_dataset.toUpperCase()} dataset`;
+        els.modelStatus.textContent = `Dataset: ${data.default_dataset.toUpperCase()} • Models: ${data.models.length}`;
       }
       
       if (els.featureCount) {
-        els.featureCount.textContent = `${data.feature_count} features loaded`;
+        els.featureCount.textContent = `Features: ${data.feature_count}`;
       }
       
       // Load features into form
@@ -323,9 +426,15 @@ async function initializeModels() {
       loadMetrics();
   renderAllModels(availableModels);
       
-      // Enable predict button
+      // Enable predict button and show action buttons
       if (els.predictBtn) {
         els.predictBtn.disabled = false;
+      }
+      
+      // Show the action buttons in feature section
+      const featureActions = document.getElementById('featureActions');
+      if (featureActions) {
+        featureActions.style.display = 'block';
       }
       
       toast.success('Models Loaded', `Successfully initialized ${data.models.length} models with ${data.default_dataset.toUpperCase()} dataset`);
@@ -337,13 +446,13 @@ async function initializeModels() {
   } catch (e) {
     console.error('Failed to initialize models', e);
     if (els.modelStatus) {
-      els.modelStatus.textContent = '❌ Failed to load models';
+      els.modelStatus.textContent = 'Failed to load models';
     }
     toast.error('Load Error', 'Failed to initialize models: ' + e.message);
   } finally {
     if (els.loadModelsBtn) {
       els.loadModelsBtn.disabled = false;
-      els.loadModelsBtn.innerHTML = '<span role="img" aria-label="Load icon">⚡</span> Initialize & Load Models';
+      els.loadModelsBtn.innerHTML = 'Load models';
     }
   }
 }
@@ -417,9 +526,16 @@ async function loadFeatures(features = null) {
     currentFeatures = features;
     buildForm(currentFeatures);
     updateFormState();
+    hideFeaturesPlaceholder();
     return;
   }
   
+  // If models are not loaded yet, show placeholder and skip
+  if (!featuresLoaded) {
+    showFeaturesPlaceholder();
+    return;
+  }
+
   // Fallback to API call for current dataset
   if (!currentDataset) {
     toast.warning('No Dataset', 'Please initialize models first');
@@ -435,6 +551,7 @@ async function loadFeatures(features = null) {
     currentFeatures = j.features || [];
     buildForm(currentFeatures);
     updateFormState();
+  hideFeaturesPlaceholder();
     
     toast.success('Features Loaded', `${currentFeatures.length} features ready for input`);
     
@@ -511,7 +628,10 @@ function formatNumericInput(input) {
 
 function updateFormState() {
   const hasFeatures = currentFeatures.length > 0;
+  const hasModels = availableModels.length > 0;
+  
   els.predictBtn.disabled = !hasFeatures;
+  els.predictAllBtn.disabled = !hasFeatures || !hasModels;
   els.clearBtn.disabled = !hasFeatures;
   // Form state validation complete
 }
@@ -528,7 +648,7 @@ function collectValues() {
   return values;
 }
 
-// Enhanced prediction with better UX and error handling
+// Enhanced prediction with multi-model support
 async function predict() {
   // Clear previous results
   clearPredictionDisplay();
@@ -550,36 +670,53 @@ async function predict() {
     return;
   }
   
+  // Get selected model if any
+  const selectedModel = els.modelSelectSecondary?.value;
+  
   // Show loading state
   if (els.predictBtn) {
     els.predictBtn.disabled = true;
-    els.predictBtn.innerHTML = '<span role="img" aria-label="Loading">🔄</span> Predicting...';
+  els.predictBtn.innerHTML = 'Predicting...';
   }
   
   try {
     const start = performance.now();
     
-    // Use default dataset for prediction (proper POST usage)
+    // Build request payload with model selection support
+    const payload = {
+      features: features,
+      dataset: currentDataset
+    };
+    
+    // Add specific model if selected
+    if (selectedModel && selectedModel !== '') {
+      payload.model_key = selectedModel;
+    }
+    
     const data = await apiCall(`${API_BASE}/predict`, {
       method: 'POST',
-      body: JSON.stringify({
-        features: features,
-        dataset: currentDataset
-      })
+      body: JSON.stringify(payload)
     });
     
     const latency = performance.now() - start;
     
-    // Update prediction display with animations
-    updatePredictionDisplay(data, currentDataset);
+  // Reveal results section and update with animations
+  showResultsSections();
+    updatePredictionDisplay(data, data.dataset || currentDataset);
     
     // Store for feedback
-    lastPrediction = { dataset: currentDataset, features, predicted_label: data.prediction };
+    lastPrediction = { 
+      dataset: data.dataset || currentDataset, 
+      features, 
+      predicted_label: data.prediction,
+      model_key: data.model_key
+    };
     if (els.sendFeedback) {
       els.sendFeedback.disabled = false;
     }
     
-    toast.success('Prediction Complete', `Detected: ${data.is_attack ? 'Attack' : 'Normal'}${data.confidence ? ' @ ' + (data.confidence*100).toFixed(1)+'%' : ''}`);
+    const modelInfo = selectedModel ? `${data.algorithm || selectedModel}` : `${data.algorithm || 'Default Model'}`;
+    toast.success('Prediction Complete', `${modelInfo}: ${data.is_attack ? 'Attack' : 'Normal'}${data.confidence ? ' @ ' + (data.confidence*100).toFixed(1)+'%' : ''}`);
     
   } catch (e) {
     if (els.predError) {
@@ -591,28 +728,185 @@ async function predict() {
     // Reset button state
     if (els.predictBtn) {
       els.predictBtn.disabled = false;
-      els.predictBtn.innerHTML = '<span role="img" aria-label="Predict icon">🔮</span> Predict';
+  els.predictBtn.innerHTML = 'Predict';
     }
   }
 }
 
+// Compare all available models
+async function predictAllModels() {
+  // Debounce fast repeated clicks; if running or just clicked, ignore
+  if (comparePending) return;
+  if (compareTimer) return;
+  compareTimer = setTimeout(() => { compareTimer = null; }, 400);
+
+  if (!featuresLoaded || availableModels.length === 0) {
+    toast.warning('Models Not Ready', 'Please load models first');
+    return;
+  }
+  
+  const features = collectValues();
+  if (features.length === 0) {
+    toast.warning('No Features', 'Please load features first');
+    return;
+  }
+  
+  // Show loading state
+  if (els.predictAllBtn) {
+    els.predictAllBtn.disabled = true;
+    els.predictAllBtn.innerHTML = 'Comparing...';
+  }
+  // Header spinner on
+  const cmpSpin = document.getElementById('comparisonSpinner');
+  if (cmpSpin) {
+    cmpSpin.classList.add('active');
+    cmpSpin.setAttribute('aria-busy', 'true');
+    cmpSpin.setAttribute('title', 'Comparing models...');
+  }
+
+  comparePending = true;
+  
+  // Clear previous comparison results
+  if (els.modelComparison) {
+    els.modelComparison.innerHTML = '<div class="text-center text-muted">Running predictions on all models...</div>';
+  }
+  
+  try {
+    const startTime = performance.now();
+    
+    // Use batch prediction endpoint for better performance
+    const data = await apiCall(`${API_BASE}/predict_batch`, {
+      method: 'POST',
+      body: JSON.stringify({
+        features: features
+      })
+    });
+    
+    const totalTime = performance.now() - startTime;
+    
+    // Merge with available models data for metrics
+    const predictions = data.results.map(result => {
+      const modelInfo = availableModels.find(m => m.model_key === result.model_key) || {};
+      return {
+        ...result,
+        metrics: modelInfo.metrics || {}
+      };
+    });
+    
+    // Display comparison results
+    displayModelComparison(predictions, totalTime);
+    
+  const successCount = data.successful_predictions || predictions.filter(p => !p.error).length;
+    toast.success('Comparison Complete', `Tested ${successCount}/${data.total_models} models in ${totalTime.toFixed(0)}ms`);
+    
+  } catch (e) {
+    toast.error('Comparison Failed', e.message);
+    console.error('Model comparison error:', e);
+    if (els.modelComparison) {
+      els.modelComparison.innerHTML = `<div class="text-center text-danger">Error: ${e.message}</div>`;
+    }
+  } finally {
+    // Reset button state
+    if (els.predictAllBtn) {
+      els.predictAllBtn.disabled = false;
+      els.predictAllBtn.innerHTML = 'Compare All Models';
+    }
+    // Header spinner off
+    const cmpSpinOff = document.getElementById('comparisonSpinner');
+    if (cmpSpinOff) {
+      cmpSpinOff.classList.remove('active');
+      cmpSpinOff.setAttribute('aria-busy', 'false');
+      cmpSpinOff.setAttribute('title', 'Waiting to compare');
+    }
+    comparePending = false;
+  }
+}
+
+// Display model comparison results
+function displayModelComparison(predictions, totalTime) {
+  if (!els.modelComparison) return;
+  
+  // Sort by confidence (descending) with errors at the end
+  const sortedPredictions = predictions.sort((a, b) => {
+    if (a.error && !b.error) return 1;
+    if (!a.error && b.error) return -1;
+    if (a.error && b.error) return 0;
+    return (b.confidence || 0) - (a.confidence || 0);
+  });
+  
+  // Count consensus
+  const attackCount = sortedPredictions.filter(p => !p.error && p.is_attack).length;
+  const normalCount = sortedPredictions.filter(p => !p.error && !p.is_attack).length;
+  const errorCount = sortedPredictions.filter(p => p.error).length;
+  
+  const consensus = attackCount > normalCount ? 'Attack' : 'Normal';
+  const consensusConfidence = Math.max(attackCount, normalCount) / (attackCount + normalCount);
+  
+  els.modelComparison.innerHTML = `
+    <div class="comparison-summary">
+      <h4>Consensus: <span class="consensus-${consensus.toLowerCase()}">${consensus}</span> (${(consensusConfidence * 100).toFixed(1)}% agreement)</h4>
+      <div class="comparison-stats">
+        <span>Attacks: ${attackCount}</span>
+        <span>Normal: ${normalCount}</span>
+        <span>Errors: ${errorCount}</span>
+        <span>Total: ${totalTime.toFixed(0)}ms</span>
+      </div>
+    </div>
+    <div class="comparison-results">
+      ${sortedPredictions.map((pred, index) => `
+        <div class="model-result ${pred.error ? 'error' : pred.is_attack ? 'attack' : 'normal'}">
+          <div class="model-result-header">
+            <strong>${pred.algorithm}</strong>
+            <span class="model-confidence">${pred.error ? 'Error' : (pred.confidence ? (pred.confidence * 100).toFixed(1) + '%' : 'N/A')}</span>
+          </div>
+          <div class="model-result-details">
+            ${pred.error ? 
+              `<span class="error-text">${pred.error}</span>` :
+              `<span class="prediction-class">Class: ${pred.prediction}</span>
+               <span class="threat-type">${pred.threat}</span>
+               <span class="attack-status ${pred.is_attack ? 'attack' : 'normal'}">${pred.is_attack ? 'Attack' : 'Normal'}</span>`
+            }
+          </div>
+          ${pred.metrics && pred.metrics.accuracy ? 
+            `<div class="model-accuracy">Accuracy: ${(pred.metrics.accuracy * 100).toFixed(1)}%</div>` : 
+            ''
+          }
+        </div>
+      `).join('')}
+    </div>
+  `;
+  
+  // Animate results
+  setTimeout(() => {
+    const results = els.modelComparison.querySelectorAll('.model-result');
+    staggerAnimation(results, 100);
+  }, 100);
+}
+
 function clearPredictionDisplay() {
-  els.predError.textContent = '';
-  els.predClass.textContent = '—';
-  els.predThreat.textContent = '—';
-  els.predConfidence.textContent = '—';
-  els.predAttack.textContent = '—';
-  els.predModel.textContent = '—';
-  els.topProbs.innerHTML = '';
+  // Reset values but keep them hidden until a prediction occurs
+  if (els.predError) els.predError.textContent = '';
+  if (els.predClass) els.predClass.textContent = '';
+  if (els.predThreat) els.predThreat.textContent = '';
+  if (els.predConfidence) els.predConfidence.textContent = '';
+  if (els.predAttack) els.predAttack.textContent = '';
+  if (els.predModel) els.predModel.textContent = '';
+  if (els.topProbs) els.topProbs.innerHTML = '';
+  showPredictionPlaceholder();
 }
 
 function updatePredictionDisplay(prediction, dataset) {
-  // Animate values appearing
+  // Ensure sections are visible when updating
+  showResultsSections();
+  // Animate values appearing with enhanced model information
+  const modelInfo = prediction.algorithm || prediction.model_type || 'Unknown';
+  const modelKey = prediction.model_key || 'default';
+  
   const updates = [
     { element: els.predClass, value: prediction.prediction },
     { element: els.predThreat, value: prediction.threat },
     { element: els.predConfidence, value: prediction.confidence ? `${(prediction.confidence * 100).toFixed(1)}%` : '—' },
-    { element: els.predModel, value: prediction.model_type ? prediction.model_type.toUpperCase() : '—' }
+    { element: els.predModel, value: `${modelInfo} (${modelKey})` }
   ];
   
   updates.forEach((update, index) => {
@@ -949,51 +1243,6 @@ async function applyThreatPreset(threatId, event = null, labelName = null) {
   }
 }
 
-async function applyRandomPreset() {
-  if (!featuresLoaded) {
-    toast.warning('Models Not Loaded', 'Please load models first');
-    return;
-  }
-  
-  if (currentFeatures.length === 0) {
-    toast.warning('No Features', 'Please load features first');
-    return;
-  }
-  
-  try {
-    const res = await fetch(`${API_BASE}/preset/sample`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dataset: currentDataset, random: true })
-    });
-    
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || 'Random preset failed');
-    
-    console.log('Got random preset response:', { 
-      selectedModel,
-      dataset: j.dataset, 
-      label: j.label, 
-      threat: j.threat, 
-      featuresCount: j.features?.length, 
-      featureOrderCount: j.feature_order?.length 
-    });
-    
-    fillFormWithData(j.feature_order || currentFeatures, j.features || []);
-    
-    if (selectedModel) {
-      toast.success('Random Sample', `Applied random sample for ${selectedModel}`);
-    } else {
-      toast.success('Random Sample', 'Applied random sample data');
-    }
-    
-  } catch (e) {
-    console.error(e);
-    els.predError.textContent = e.message;
-    toast.error('Random Preset Failed', e.message);
-  }
-}
-
 function fillFormWithData(featureOrder, values) {
   console.log('fillFormWithData called with:', { featureOrder: featureOrder?.slice(0, 3), values: values?.slice(0, 3) });
   
@@ -1230,8 +1479,8 @@ async function explainLime() {
 }
 
 async function incrementalUpdate() {
-  els.incStatus.textContent = 'Updating model...';
   els.incUpdate.disabled = true;
+  els.incUpdate.textContent = 'Updating...';
   
   try {
     const res = await fetch(`${API_BASE}/incremental/update`, {
@@ -1243,23 +1492,14 @@ async function incrementalUpdate() {
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || 'Update failed');
     
-    els.incStatus.textContent = `Updated with ${j.samples_used} samples`;
-    els.incStatus.style.color = 'var(--color-success)';
-    
-    setTimeout(() => {
-      els.incStatus.textContent = '—';
-      els.incStatus.style.color = '';
-    }, 3000);
-    
     loadMetrics();
     toast.success('Model Updated', `Processed ${j.samples_used} new samples`);
     
   } catch (e) {
-    els.incStatus.textContent = `Error: ${e.message}`;
-    els.incStatus.style.color = 'var(--color-danger)';
     toast.error('Update Failed', e.message);
   } finally {
     els.incUpdate.disabled = false;
+    els.incUpdate.innerHTML = '<span aria-hidden="true"><svg class="icon" width="16" height="16"><use href="#icon-update"/></svg></span> Update Model';
   }
 }
 
@@ -1379,9 +1619,9 @@ function initEventListeners() {
   els.loadModelsBtn?.addEventListener('click', initializeModels);
   
   els.predictBtn?.addEventListener('click', predict);
+  els.predictAllBtn?.addEventListener('click', predictAllModels);
   els.clearBtn?.addEventListener('click', clearForm);
   els.sendFeedback?.addEventListener('click', sendFeedback);
-  els.presetRandom?.addEventListener('click', applyRandomPreset);
   
   // bulkFill removed
   
@@ -1567,6 +1807,19 @@ async function initialize() {
       console.error('Critical DOM elements not found');
       return;
     }
+
+    // Remove header API status indicator (right-side online/models text)
+    // Keeps the theme toggle but removes the status text block entirely.
+    (function removeHeaderStatusIndicator(){
+      const headerIndicator = document.querySelector('.app-header .status-indicator');
+      if (headerIndicator) {
+        headerIndicator.remove();
+      }
+      // Ensure code paths that try to update it no-op
+      if (els && 'apiStatus' in els) {
+        els.apiStatus = null;
+      }
+    })();
     
     // Initialize core systems
     initTheme();
@@ -1575,6 +1828,10 @@ async function initialize() {
     initScrollEffects();
     initKeyboardShortcuts();
     initEventListeners();
+  // Ensure prediction results show only the placeholder before first prediction
+  showPredictionPlaceholder();
+  // Ensure features placeholder is visible until models are loaded
+  showFeaturesPlaceholder();
     
     // Load initial data
   await pingApi();

@@ -17,12 +17,12 @@
   --space-16: 64px;
 
   /* Typography Scale */
-  --text-xs: 11px;
-  --text-sm: 13px;
-  --text-base: 16px;
-  --text-lg: 20px;
-  --text-xl: 24px;
-  --text-2xl: 32px;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 17px;
+  --text-lg: 21px;
+  --text-xl: 26px;
+  --text-2xl: 34px;
 
   /* Border Radius */
   --radius-sm: 6px;
@@ -79,9 +79,39 @@
   --chart-tertiary: #06b6d4;
 }
 
-/* Dark Theme */
+/* Dark Theme - Unified approach using data attribute */
+[data-theme="dark"] {
+  --color-bg-base: #0a0910;
+  --color-bg-elevated: rgba(20, 19, 30, 0.6);
+  --color-bg-muted: #252932;
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-subtle: #1a1d23;
+  --color-text-primary: #f0f0f5;
+  --color-text-secondary: #a0a0b0;
+  --color-text-muted: #606070;
+  
+  --color-primary: #9f55ff;
+  --color-primary-hover: #7a2bff;
+  --color-primary-glow: rgba(159, 85, 255, 0.15);
+  
+  --chart-grid: rgba(255, 255, 255, 0.06);
+  --chart-line: #64748b;
+  
+  /* Enhanced dark theme colors */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #3b82f6;
+  
+  /* Dark theme specific shadows */
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+  --shadow-2: 0 8px 25px rgba(0, 0, 0, 0.4), 0 4px 10px rgba(0, 0, 0, 0.25);
+  --shadow-3: 0 15px 35px rgba(0, 0, 0, 0.5), 0 8px 15px rgba(0, 0, 0, 0.3);
+}
+
+/* Auto dark theme based on system preference */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --color-bg-base: #0a0910;
     --color-bg-elevated: rgba(20, 19, 30, 0.6);
     --color-bg-muted: #252932;
@@ -97,19 +127,16 @@
     
     --chart-grid: rgba(255, 255, 255, 0.06);
     --chart-line: #64748b;
+    
+    --color-success: #10b981;
+    --color-warning: #f59e0b;
+    --color-danger: #ef4444;
+    --color-info: #3b82f6;
+    
+    --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+    --shadow-2: 0 8px 25px rgba(0, 0, 0, 0.4), 0 4px 10px rgba(0, 0, 0, 0.25);
+    --shadow-3: 0 15px 35px rgba(0, 0, 0, 0.5), 0 8px 15px rgba(0, 0, 0, 0.3);
   }
-}
-
-/* Dark mode override class */
-[data-theme="dark"] {
-  --color-bg-base: #0a0910;
-  --color-bg-elevated: rgba(20, 19, 30, 0.6);
-  --color-bg-muted: #252932;
-  --color-border: rgba(255, 255, 255, 0.1);
-  --color-border-subtle: #1a1d23;
-  --color-text-primary: #f0f0f5;
-  --color-text-secondary: #a0a0b0;
-  --color-text-muted: #606070;
 }
 
 /* Global Reset & Base Styles */
@@ -256,7 +283,7 @@ p {
 .mb-4 { margin-bottom: var(--space-4); }
 .mt-4 { margin-top: var(--space-4); }
 
-/* Header Component */
+/* Header Component - Enhanced dark theme support */
 .app-header {
   position: sticky;
   top: 0;
@@ -265,6 +292,18 @@ p {
   border-bottom: 1px solid var(--color-border);
   backdrop-filter: blur(12px);
   transition: all var(--duration-normal) var(--ease-smooth);
+}
+
+/* Dark theme specific header styling */
+[data-theme="dark"] .app-header {
+  background: rgba(10, 9, 16, 0.85);
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(16px);
+}
+
+[data-theme="dark"] .app-header.scrolled {
+  background: rgba(10, 9, 16, 0.95);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .app-header.scrolled {
@@ -393,8 +432,29 @@ p {
 
 .charts-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: var(--space-6);
+}
+
+/* Make Model Comparison span two rows so left column stacks Prediction + Explainability */
+.charts-grid .card-compare {
+  grid-column: 2;
+  grid-row: span 2;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Ensure the card content fills available space */
+.charts-grid .card-compare .card-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Make the model comparison grid fill remaining space */
+.charts-grid .card-compare .model-comparison-grid {
+  flex: 1;
 }
 
 /* Investigation Panel */
@@ -403,7 +463,7 @@ p {
   gap: var(--space-6);
 }
 
-/* Card System */
+/* Card System - Enhanced with better dark theme support */
 .card {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
@@ -417,6 +477,19 @@ p {
   border-color: var(--color-primary);
   box-shadow: var(--shadow-2);
   transform: translateY(-1px);
+}
+
+/* Dark theme specific card enhancements */
+[data-theme="dark"] .card {
+  background: rgba(30, 29, 40, 0.8);
+  border-color: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+}
+
+[data-theme="dark"] .card:hover {
+  background: rgba(30, 29, 40, 0.95);
+  border-color: var(--color-primary);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.6), 0 4px 10px rgba(159, 85, 255, 0.1);
 }
 
 .card-header {
@@ -629,10 +702,25 @@ p {
   border-radius: var(--radius-md);
   background: var(--color-bg-base);
   color: var(--color-text-primary);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: 400;
   transition: all var(--duration-normal) var(--ease-smooth);
   min-height: 36px;
+}
+
+/* Dark theme specific form styles */
+[data-theme="dark"] .field-input,
+[data-theme="dark"] .field-select {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .field-input:focus,
+[data-theme="dark"] .field-select:focus {
+  background: var(--color-bg-base);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-glow);
 }
 
 .field-input:focus,
@@ -640,6 +728,36 @@ p {
   outline: none;
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px var(--color-primary-glow);
+}
+
+/* Invalid state styling for inputs/selects */
+.field-input.invalid,
+.field-select.invalid,
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+
+.field-input.invalid:focus,
+.field-select.invalid:focus,
+input[aria-invalid="true"]:focus,
+select[aria-invalid="true"]:focus {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+}
+
+/* Helper text / error text styles under fields */
+.field-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-1);
+  line-height: 1.2;
+}
+
+.field-hint.error,
+.field-error {
+  color: var(--color-danger);
 }
 
 .field-input::placeholder {
@@ -664,7 +782,7 @@ p {
   border-radius: var(--radius-md);
   background: var(--color-bg-elevated);
   color: var(--color-text-primary);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-weight: 500;
   text-decoration: none;
   cursor: pointer;
@@ -1191,7 +1309,7 @@ p {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--space-3) 0;
+  padding: var(--space-2) 0;
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
@@ -1206,7 +1324,7 @@ p {
 }
 
 .prediction-value {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--color-primary);
 }
@@ -1217,6 +1335,28 @@ p {
 
 .prediction-value.attack-no {
   color: var(--color-success);
+}
+
+/* Emphasized primary outcome row */
+.prediction-row.attack-priority {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.prediction-row.attack-priority .prediction-label {
+  font-size: var(--text-base);
+}
+
+.prediction-row.attack-priority #predAttack {
+  font-size: var(--text-xl);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+/* Generic inline svg icon utility */
+.icon {
+  display: inline-block;
+  vertical-align: middle;
 }
 
 /* Probability Display */
@@ -1236,7 +1376,7 @@ p {
 .probability-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
 
 .probability-item {
@@ -1484,6 +1624,12 @@ p {
   .charts-grid {
     grid-template-columns: 1fr;
   }
+
+  /* Reset explicit placement on smaller screens */
+  .charts-grid .card-compare {
+    grid-column: auto;
+    grid-row: auto;
+  }
 }
 
 @media (max-width: 900px) {
@@ -1542,6 +1688,32 @@ p {
   background: var(--color-bg-elevated);
 }
 
+/* Feature Actions - Action buttons in the feature inputs footer */
+#featureActions {
+  background: var(--color-bg-elevated);
+  border-top: 1px solid var(--color-border-subtle);
+  padding: var(--space-4) var(--space-6);
+}
+
+#featureActions .btn {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+/* Labels in Prediction Results Section */
+.labels-section {
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.labels-section h3 {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
 /* Responsive feature grid */
 @media (max-width: 1200px) {
   .grid-features-compact { 
@@ -1589,38 +1761,51 @@ p {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Theme Toggle */
+/* Theme Toggle - Enhanced visibility and functionality */
 .theme-toggle {
   position: relative;
-  width: 50px;
-  height: 26px;
+  width: 52px;
+  height: 28px;
   background: var(--color-bg-muted);
-  border: 1px solid var(--color-border);
-  border-radius: 13px;
+  border: 2px solid var(--color-border);
+  border-radius: 14px;
   cursor: pointer;
   transition: all var(--duration-normal) var(--ease-smooth);
+  overflow: hidden;
+}
+
+.theme-toggle:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-glow);
 }
 
 .theme-toggle::before {
   content: '☀️';
   position: absolute;
-  top:2px;
-  left:2px;
-  width:20px;
-  height:20px;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
   background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
-  border-radius:50%;
-  transition: transform var(--duration-normal) var(--ease-smooth);
-  box-shadow:0 2px 4px rgba(0,0,0,0.3);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-size:12px;
+  border-radius: 50%;
+  transition: all var(--duration-normal) var(--ease-smooth);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  filter: contrast(1.2) brightness(1.1);
+}
+
+[data-theme="dark"] .theme-toggle {
+  background: var(--color-bg-elevated);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 [data-theme="dark"] .theme-toggle::before {
   transform: translateX(22px);
-  content:'🌙';
+  content: '🌙';
+  background: linear-gradient(135deg, #6366f1, #4338ca);
 }
 
 /* Compact header adjustments for overflow on small widths */
@@ -1725,3 +1910,232 @@ header select#modelSelect:focus {
   color: var(--color-text-primary);
   font-weight: 600;
 }
+
+/* Model Comparison Styles */
+.model-comparison-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.comparison-summary {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.comparison-summary h4 {
+  margin: 0 0 var(--space-3) 0;
+  font-size: var(--text-lg);
+  color: var(--color-text-primary);
+}
+
+.consensus-attack {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+.consensus-normal {
+  color: var(--color-success);
+  font-weight: 700;
+}
+
+.comparison-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.comparison-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-3);
+}
+
+.model-result {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  transition: all var(--duration-normal) var(--ease-smooth);
+  background: var(--color-bg-base);
+}
+
+.model-result.attack {
+  border-left: 4px solid var(--color-danger);
+  background: rgba(239, 68, 68, 0.03);
+}
+
+.model-result.normal {
+  border-left: 4px solid var(--color-success);
+  background: rgba(34, 197, 94, 0.03);
+}
+
+.model-result.error {
+  border-left: 4px solid var(--color-warning);
+  background: rgba(245, 158, 11, 0.03);
+}
+
+.model-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.model-result-header strong {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-size: var(--text-base);
+}
+
+.model-confidence {
+  font-weight: 500;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.model-result-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.prediction-class,
+.threat-type {
+  color: var(--color-text-secondary);
+}
+
+.attack-status {
+  font-weight: 600;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.attack-status.attack {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-danger);
+}
+
+.attack-status.normal {
+  background: rgba(34, 197, 94, 0.1);
+  color: var(--color-success);
+}
+
+.error-text {
+  color: var(--color-danger);
+  font-style: italic;
+}
+
+.model-accuracy {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+/* Secondary button style for Compare All Models */
+.btn-secondary {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-bg-muted);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Transparent button style for Clear Form */
+.btn-transparent {
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid transparent;
+}
+
+.btn-transparent:hover:not(:disabled) {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.btn-transparent:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Outline primary button style for Compare All Models */
+.btn-outline-primary {
+  background: transparent;
+  color: var(--color-primary);
+  border: 2px solid var(--color-primary);
+  border-radius: var(--radius-lg);
+}
+
+.btn-outline-primary:hover:not(:disabled) {
+  background: var(--color-primary-glow);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  box-shadow: 0 0 15px var(--accent-glow);
+}
+
+.btn-outline-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Inline spinner for small header/loading indicators */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-right-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spinner-rotate 0.8s linear infinite;
+  opacity: 0; /* hidden by default */
+  transition: opacity var(--duration-fast) var(--ease-smooth);
+}
+
+.spinner.active { opacity: 1; }
+
+@keyframes spinner-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Standardize badge shapes across dataset, attack status, severity */
+.dataset-badge,
+.attack-status,
+.severity-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: 9999px; /* pill shape */
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.severity-indicator .severity-icon { width: 10px; height: 10px; }

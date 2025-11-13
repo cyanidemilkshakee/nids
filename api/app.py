@@ -8,7 +8,6 @@ import csv
 import json
 from threading import Lock
 from datetime import datetime
-import tensorflow as tf
 
 # Only import if needed for explainability
 import shap
@@ -19,6 +18,35 @@ except ImportError:
 
 app = Flask(__name__)
 CORS(app)
+# Prefer JSON responses for API endpoints on errors
+def _wants_json_response() -> bool:
+    try:
+        api_prefixes = (
+            '/explain', '/predict', '/models', '/metrics', '/preset',
+            '/initialize', '/status', '/datasets', '/model_', '/predict_batch'
+        )
+        return request.accept_mimetypes.accept_json or request.path.startswith(api_prefixes)
+    except Exception:
+        return False
+
+@app.errorhandler(404)
+def handle_404(e):
+    if _wants_json_response():
+        return jsonify({'error': 'Not Found', 'message': 'Endpoint not found', 'path': request.path}), 404
+    return e
+
+@app.errorhandler(405)
+def handle_405(e):
+    if _wants_json_response():
+        return jsonify({'error': 'Method Not Allowed', 'message': 'Use the correct HTTP method for this endpoint', 'path': request.path}), 405
+    return e
+
+@app.errorhandler(500)
+def handle_500(e):
+    if _wants_json_response():
+        return jsonify({'error': 'Internal Server Error', 'message': 'The server encountered an error processing the request'}), 500
+    return e
+
 
 # Utilities
 def _resolve_path(path_str: str) -> str:
@@ -52,7 +80,7 @@ except Exception as e:
 # Extend dataset definitions dynamically by scanning models directory
 MODELS_DIR = _resolve_path('../models')
 
-# Model registry structure: { key: { 'path': str, 'type': 'sklearn'|'keras', 'features': list } }
+# Model registry structure: { key: { 'path': str, 'type': 'sklearn', 'features': list } }
 MODEL_REGISTRY = {}
 
 
@@ -78,9 +106,6 @@ def _scan_models():
             if lower.endswith(('.joblib', '.pkl')):
                 key = os.path.splitext(fname)[0]
                 MODEL_REGISTRY[key] = {'path': fpath, 'type': 'sklearn'}
-            elif lower.endswith(('.keras', '.h5')):
-                key = os.path.splitext(fname)[0]
-                MODEL_REGISTRY[key] = {'path': fpath, 'type': 'keras'}
         print(f"[INFO] Scanned models directory, found {len(MODEL_REGISTRY)} models")
     except Exception as e:
         print(f"[WARN] Model scan failed: {e}")
@@ -95,33 +120,46 @@ def _load_model(model_key):
     meta = MODEL_REGISTRY[model_key]
     mpath = meta['path']
     mtype = meta['type']
-    if mtype == 'sklearn':
-        loaded_obj = joblib.load(mpath)
-        # Handle both old format (direct model) and new format (model package)
-        if isinstance(loaded_obj, dict) and 'model' in loaded_obj:
-            # New format: model package with preprocessing
-            model_package = loaded_obj
-            model = model_package['model']
-        else:
-            # Old format: direct model
-            model_package = {
-                'model': loaded_obj,
-                'preprocessing': None,
-                'scaler': None,
-                'feature_names': None
-            }
-            model = loaded_obj
+    # Only sklearn models are supported
+    loaded_obj = joblib.load(mpath)
+    # Handle both old format (direct model) and new format (model package)
+    if isinstance(loaded_obj, dict) and 'model' in loaded_obj:
+        # New format: model package with preprocessing
+        model_package = loaded_obj
+        model = model_package['model']
     else:
-        model = tf.keras.models.load_model(mpath)
+        # Old format: direct model
         model_package = {
-            'model': model,
+            'model': loaded_obj,
             'preprocessing': None,
             'scaler': None,
             'feature_names': None
         }
+        model = loaded_obj
+    # Try to capture feature names from the model for alignment
+    try:
+        feature_names = None
+        if hasattr(model, 'feature_names_in_'):
+            # sklearn-compatible estimators
+            feature_names = [str(x) for x in model.feature_names_in_.tolist()]
+        else:
+            # XGBoost sklearn wrapper may expose booster feature names
+            algoname = type(model).__name__
+            if 'XGB' in algoname and hasattr(model, 'get_booster'):
+                booster = model.get_booster()
+                try:
+                    fn = booster.feature_names
+                    if fn:
+                        feature_names = [str(x) for x in fn]
+                except Exception:
+                    pass
+        if feature_names:
+            model_package['feature_names'] = feature_names
+    except Exception:
+        pass
     with cache_lock:
-        MODEL_CACHE[model_key] = (model_package, mtype)
-    return model_package, mtype
+        MODEL_CACHE[model_key] = (model_package, 'sklearn')
+    return model_package, 'sklearn'
 
 def _prepare_features(rows):
     """Prepare feature matrix from input rows."""
@@ -287,18 +325,17 @@ def load_model_and_features(dataset_key):
                     return None, None, None, f"Unsupported model format. Only .joblib files are supported."
                 MODEL_CACHE[cache_key] = (model_package, model_type)
         
-        # Load feature order from the model training (not from dataset)
-        feature_names_path = _resolve_path("../models/feature_names.json")
+        # Prefer per-model feature names if packaged with the model
         feature_order = []
-        
-        if os.path.exists(feature_names_path):
-            try:
-                with open(feature_names_path, 'r') as f:
-                    feature_order = json.load(f)
-            except Exception as e:
-                print(f"[WARN] Failed to load feature names from {feature_names_path}: {e}")
-        
-        # Fallback: try to get from dataset (old behavior)
+        try:
+            if isinstance(model_package, dict):
+                packaged = model_package.get('feature_names')
+                if packaged and isinstance(packaged, (list, tuple)):
+                    feature_order = list(packaged)
+        except Exception:
+            pass
+
+        # Fallback: read from dataset file to avoid cross-model contamination
         if not feature_order:
             try:
                 feature_df = pd.read_csv(feature_path, nrows=1)
@@ -443,26 +480,28 @@ def get_features(dataset_key):
     if not entry:
         return jsonify({"error": f"Dataset '{dataset_key}' not supported."}), 404
     
-    # Get features from model training (not dataset file)
-    feature_names_path = _resolve_path("../models/feature_names.json")
-    if os.path.exists(feature_names_path):
-        try:
-            with open(feature_names_path, 'r') as f:
-                features = json.load(f)
-            return jsonify({"dataset": dataset_key, "features": features})
-        except Exception as e:
-            return jsonify({"error": f"Failed to read model features: {str(e)}"}), 500
-    else:
-        # Fallback to dataset file
-        feature_path = _resolve_path(entry["feature_path"])
-        if not os.path.exists(feature_path):
-            return jsonify({"error": f"Feature file not found: {feature_path}"}), 404
-        try:
-            df = pd.read_csv(feature_path, nrows=1)
-            features = [c for c in df.columns if c != 'label']
-            return jsonify({"dataset": dataset_key, "features": features})
-        except Exception as e:
-            return jsonify({"error": f"Failed to read features: {str(e)}"}), 500
+    # Prefer features tied to the configured model for this dataset
+    try:
+        model_path = _resolve_path(entry['model_path'])
+        if os.path.exists(model_path):
+            loaded_obj = joblib.load(model_path)
+            if isinstance(loaded_obj, dict):
+                model_features = loaded_obj.get('feature_names')
+                if model_features:
+                    return jsonify({"dataset": dataset_key, "features": model_features})
+    except Exception:
+        pass
+
+    # Fallback to dataset file
+    feature_path = _resolve_path(entry["feature_path"])
+    if not os.path.exists(feature_path):
+        return jsonify({"error": f"Feature file not found: {feature_path}"}), 404
+    try:
+        df = pd.read_csv(feature_path, nrows=1)
+        features = [c for c in df.columns if c != 'label']
+        return jsonify({"dataset": dataset_key, "features": features})
+    except Exception as e:
+        return jsonify({"error": f"Failed to read features: {str(e)}"}), 500
 
 @app.route('/metrics', methods=['GET'])
 def get_metrics():
@@ -597,10 +636,7 @@ def model_performance():
                             algorithm = 'Neural Network'
                         elif 'decisiontree' in key_lower:
                             algorithm = 'Decision Tree'
-                        elif 'cnn' in key_lower or 'gan' in key_lower:
-                            algorithm = 'CNN/GAN'
-                        elif 'adversarial' in key_lower:
-                            algorithm = 'Adversarial CNN'
+                        # CNN/GAN models removed
                     
                     performance_data.append({
                         'model_key': model_key,
@@ -659,13 +695,13 @@ def model_performance():
 @app.route('/models', methods=['GET'])
 def list_models():
     """Return list of all model artifacts in models directory for UI model selector.
-    Response schema:
-      {
-        "models": [
-            {"model_key": str, "type": "sklearn"|"keras", "size_mb": float|None,
-             "path": str, "dataset_guess": str|None, "metrics": {...}}
-        ]
-      }
+        Response schema:
+            {
+                "models": [
+                        {"model_key": str, "type": "sklearn", "size_mb": float|None,
+                         "path": str, "dataset_guess": str|None, "metrics": {...}}
+                ]
+            }
     """
     try:
         # Re-scan on every request to pick up new models without restart (cheap: directory listing only)
@@ -724,8 +760,7 @@ def list_models():
             if not algorithm_guess:
                 if 'rf' in lower or 'randomforest' in lower:
                     algorithm_guess = 'Random Forest'
-                elif 'gan' in lower and 'cnn' in lower:
-                    algorithm_guess = 'CNN-GAN'
+                # CNN/GAN models removed
                 elif 'extratrees' in lower:
                     algorithm_guess = 'Extra Trees'
                 elif 'gradientboosting' in lower or 'gb' in lower:
@@ -738,8 +773,7 @@ def list_models():
                     algorithm_guess = 'Neural Network'
                 elif 'decisiontree' in lower or 'tree' in lower:
                     algorithm_guess = 'Decision Tree'
-                elif 'cnn' in lower or 'adversarial' in lower:
-                    algorithm_guess = 'CNN'
+                # CNN models removed
             balanced = bool('balanced' in lower)
             items.append({
                 'model_key': key,
@@ -844,20 +878,39 @@ def predict():
         if not req_json:
             return jsonify({'error': 'Request body must be valid JSON.'}), 400
             
-        # Use default dataset if not specified
+        # Support both dataset and model_key specification
         dataset = req_json.get('dataset', DEFAULT_DATASET)
+        model_key = req_json.get('model_key')  # Optional specific model override
         data = req_json.get('features')
 
         if not data or not isinstance(data, list):
             return jsonify({'error': 'Request must include "features" (list).'}), 400
 
-        # Use default model and features if available
-        if dataset == DEFAULT_DATASET and DEFAULT_MODEL and DEFAULT_FEATURES:
+        # Choose model based on priority: model_key > dataset preference > default
+        if model_key and model_key in MODEL_REGISTRY:
+            # Use specific model requested
+            model_package, model_type = _load_model(model_key)
+            feature_order = GLOBAL_FEATURE_ORDER
+            # Guess dataset from model key for label mapping
+            if 'unsw' in model_key.lower():
+                label_map = DATASETS.get('unsw', {}).get('label_map', {})
+                dataset_used = 'unsw'
+            elif 'cicids' in model_key.lower():
+                label_map = DATASETS.get('cicids', {}).get('label_map', {})
+                dataset_used = 'cicids'
+            else:
+                label_map = DATASETS.get(DEFAULT_DATASET, {}).get('label_map', {})
+                dataset_used = DEFAULT_DATASET
+            print(f"[DEBUG] Using specific model: {model_key} with {dataset_used} labels")
+        elif dataset == DEFAULT_DATASET and DEFAULT_MODEL and DEFAULT_FEATURES:
+            # Use default pre-loaded model
             model_package, model_type = DEFAULT_MODEL
             feature_order = DEFAULT_FEATURES
             label_map = DATASETS[dataset].get('label_map', {})
+            dataset_used = dataset
+            model_key = 'default'
         else:
-            # Fallback to loading model
+            # Fallback to loading model by dataset
             if dataset not in DATASETS:
                 return jsonify({'error': f'Dataset "{dataset}" not supported. Available: {list(DATASETS.keys())}'}), 400
 
@@ -865,6 +918,8 @@ def predict():
             if err:
                 return jsonify({'error': err}), 400
             model_package, model_type = m_tuple
+            dataset_used = dataset
+            model_key = f'dataset_{dataset}'
         
         # Extract actual model from package
         if isinstance(model_package, dict) and 'model' in model_package:
@@ -872,20 +927,56 @@ def predict():
         else:
             model = model_package
 
-        # Validate feature count
-        if len(data) != len(feature_order):
-            return jsonify({'error': f'Expected {len(feature_order)} features for dataset "{dataset}", received {len(data)}.'}), 400
-
         # Validate feature values are numeric
         try:
             numeric_data = [float(x) for x in data]
         except (ValueError, TypeError) as e:
             return jsonify({'error': f'All feature values must be numeric. Error: {str(e)}'}), 400
 
-        print(f"[DEBUG] Dataset: {dataset}, Features length: {len(data)}, Model type: {model_type}")
-        
-        # Convert to DataFrame for sklearn model
-        df = pd.DataFrame([numeric_data], columns=feature_order)
+        # Determine model-specific feature order if available
+        model_features = None
+        if isinstance(model_package, dict):
+            model_features = model_package.get('feature_names')
+        # Fallback to dataset/global feature order (what client likely used)
+        base_input_order = feature_order if feature_order else GLOBAL_FEATURE_ORDER
+
+        df = None
+        # Case 1: model exposes its own features
+        if model_features:
+            if len(numeric_data) == len(model_features):
+                # Direct match, use as-is
+                df = pd.DataFrame([numeric_data], columns=model_features)
+            else:
+                # Try to map from dataset CSV feature list (base 30) to model features (engineered)
+                dataset_entry = DATASETS.get(dataset_used)
+                base_csv_features = None
+                if dataset_entry:
+                    try:
+                        feat_df = pd.read_csv(_resolve_path(dataset_entry['feature_path']), nrows=1)
+                        base_csv_features = [c for c in feat_df.columns if c != 'label']
+                    except Exception:
+                        base_csv_features = None
+                # Determine source names for incoming vector
+                source_names = None
+                if base_csv_features and len(base_csv_features) == len(numeric_data):
+                    source_names = base_csv_features
+                elif len(base_input_order) == len(numeric_data):
+                    source_names = base_input_order
+                # If we can infer names, build mapping
+                if source_names:
+                    values_map = {name: val for name, val in zip(source_names, numeric_data)}
+                    aligned_row = [values_map.get(name, 0.0) for name in model_features]
+                    df = pd.DataFrame([aligned_row], columns=model_features)
+                    print(f"[DEBUG] Mapped {len(source_names)} -> {len(model_features)} (filled_missing={sum(1 for n in model_features if n not in values_map)})")
+                else:
+                    return jsonify({'error': f'Feature count mismatch for model: expected {len(model_features)}, received {len(numeric_data)}.'}), 400
+        else:
+            # No per-model list; fall back to expected input order
+            if len(numeric_data) != len(base_input_order):
+                return jsonify({'error': f'Expected {len(base_input_order)} features, received {len(numeric_data)}.'}), 400
+            df = pd.DataFrame([numeric_data], columns=base_input_order)
+
+        print(f"[DEBUG] Model: {model_key}, Dataset: {dataset_used}, InputFeatures: {len(numeric_data)}, ModelFeatures: {df.shape[1]}, Type: {model_type}")
         
         # Apply preprocessing if needed
         df_processed = _apply_preprocessing(df, model_package)
@@ -901,7 +992,7 @@ def predict():
                 probs = model.predict_proba(df_processed)[0]
                 probabilities = {str(i): float(p) for i, p in enumerate(probs)}
                 confidence = float(np.max(probs))
-                print(f"[DEBUG] Sklearn probs snippet: {probs[:5]} ...")
+                print(f"[DEBUG] Probabilities for top classes: {sorted(probabilities.items(), key=lambda x: -x[1])[:3]}")
             except Exception as e:
                 print(f"[WARN] Failed to get probabilities: {e}")
         elif hasattr(model, 'decision_function'):
@@ -920,12 +1011,25 @@ def predict():
         else:
             confidence = 0.5  # Default confidence for models without probability
             
-        print(f"[DEBUG] Prediction raw label: {prediction}")
+        print(f"[DEBUG] Prediction: {prediction}, Threat: {label_map.get(int(prediction), 'Unknown')}")
         threat_name = label_map.get(int(prediction), 'Unknown')
-        is_attack = bool(prediction != 0)  # Assuming 0 is normal traffic - convert to Python bool
+        is_attack = bool(prediction != 0)  # Assuming 0 is normal traffic
+        
+        # Extract algorithm name for response
+        algorithm_name = type(model).__name__
+        if 'XGB' in algorithm_name:
+            algorithm_name = 'XGBoost'
+        elif 'LGBM' in algorithm_name or 'LightGBM' in algorithm_name:
+            algorithm_name = 'LightGBM'
+        elif 'RandomForest' in algorithm_name:
+            algorithm_name = 'Random Forest'
+        elif 'GradientBoosting' in algorithm_name:
+            algorithm_name = 'Gradient Boosting'
+        elif 'ExtraTrees' in algorithm_name:
+            algorithm_name = 'Extra Trees'
         
         # Update metrics
-        _update_metrics_placeholder(dataset, correct=True)
+        _update_metrics_placeholder(dataset_used, correct=True)
         
         return jsonify({
             'prediction': int(prediction),
@@ -935,7 +1039,9 @@ def predict():
             'is_attack': is_attack,
             'feature_order': feature_order,
             'model_type': model_type,
-            'dataset': dataset
+            'model_key': model_key,
+            'algorithm': algorithm_name,
+            'dataset': dataset_used
         })
     except Exception as e:
         print(f"[ERROR] Prediction failed: {e}")
@@ -1132,82 +1238,492 @@ def receive_feedback():
         return jsonify({'error': f'Failed to record feedback: {str(e)}'}), 500
 
 
-@app.route('/explain/shap', methods=['POST'])
+@app.route('/explain/shap', methods=['POST', 'GET'])
+@app.route('/explain/shap/', methods=['POST', 'GET'])
 def explain_shap():
+    if request.method == 'GET':
+        return jsonify({
+            'usage': 'POST JSON to /explain/shap',
+            'body': {'dataset': 'unsw', 'features': 'list[float]'},
+            'optional': {'detailed': False, 'auto_pad': 'query param true/false'}
+        }), 200
     req_json = request.json or {}
     dataset = req_json.get('dataset')
-    data = req_json.get('features')  # single instance
+    data = req_json.get('features')  # single instance (list of numeric)
+    detailed = req_json.get('detailed', False)  # Request detailed explanation
+    
     if not dataset or data is None:
         return jsonify({'error': 'dataset and features required'}), 400
+
+    # Load model & features
     m_tuple, feature_order, label_map, err = load_model_and_features(dataset)
     if err:
         return jsonify({'error': err}), 400
-    model, model_type = m_tuple
-    
+    model_package, model_type = m_tuple
+
     if model_type != 'sklearn':
         return jsonify({'error': 'SHAP explanation only supported for sklearn models'}), 400
-        
-    df = pd.DataFrame([data], columns=feature_order)
-    # Build / reuse SHAP explainer
-    cache_key = f"shap::{dataset}"
+
+    # Extract actual estimator
+    estimator = model_package.get('model') if isinstance(model_package, dict) else model_package
+
+    # Validate feature vector length; optionally allow auto padding via flag
+    expected_len = len(feature_order)
+    if not isinstance(data, (list, tuple)):
+        return jsonify({
+            'error': 'features must be a list of numeric values',
+            'expected_count': expected_len,
+            'received_count': 0,
+            'hint': f'Use /preset/sample endpoint to get valid feature vectors for dataset "{dataset}"'
+        }), 400
+    if len(data) != expected_len:
+        # allow optional auto padding with zeros when client passes ?auto_pad=true
+        auto_pad = request.args.get('auto_pad', 'false').lower() in ('1', 'true', 'yes')
+        if auto_pad and len(data) < expected_len:
+            data = list(data) + [0.0] * (expected_len - len(data))
+        else:
+            return jsonify({
+                'error': f'Invalid features length: expected {expected_len}, got {len(data)}',
+                'expected_count': expected_len,
+                'received_count': len(data),
+                'hint': f'Use /preset/sample endpoint to get valid feature vectors for dataset "{dataset}", or add ?auto_pad=true to pad with zeros',
+                'sample_request': f'curl -X POST http://localhost:5000/preset/sample -H "Content-Type: application/json" -d \'{{"dataset":"{dataset}"}}\''
+            }), 400
+
+    # Build input frame in expected feature order
+    try:
+        df = pd.DataFrame([data], columns=feature_order)
+    except Exception as e:
+        return jsonify({'error': f'Invalid features vector: {e}'}), 400
+
+    # Apply same preprocessing used at inference
+    df_processed = _apply_preprocessing(df, model_package)
+    
+    # Get prediction for context
+    prediction = estimator.predict(df_processed)[0]
+    proba = None
+    if hasattr(estimator, 'predict_proba'):
+        proba = estimator.predict_proba(df_processed)[0]
+
+    # Create explainer (prefer TreeExplainer for tree models, otherwise KernelExplainer)
+    # Include model mtime in cache key to auto-invalidate when model file changes
+    try:
+        model_path_abs = _resolve_path(DATASETS[dataset]['model_path'])
+        model_mtime = int(os.path.getmtime(model_path_abs)) if os.path.exists(model_path_abs) else 0
+    except Exception:
+        model_mtime = 0
+    cache_key = f"shap::{dataset}::{type(estimator).__name__}::{model_mtime}"
     with cache_lock:
         explainer = EXPLAINER_CACHE.get(cache_key)
     try:
         if explainer is None:
             try:
-                explainer = shap.TreeExplainer(model)
+                # Works for RandomForest/ExtraTrees/GradientBoosting/XGBoost (sklearn API)
+                # Use check_additivity=False to avoid additivity warnings on some ensemble models
+                explainer = shap.TreeExplainer(estimator, feature_perturbation="tree_path_dependent")
             except Exception:
-                if hasattr(model, 'predict_proba'):
-                    explainer = shap.KernelExplainer(model.predict_proba, shap.sample(pd.DataFrame([data], columns=feature_order), 1))
-                else:
-                    explainer = shap.KernelExplainer(model.predict, shap.sample(pd.DataFrame([data], columns=feature_order), 1))
+                # KernelExplainer needs a background dataset and a predict function
+                # Build a small background sample in RAW feature space then preprocess inside predict_fn
+                try:
+                    feature_path = _resolve_path(DATASETS[dataset]['feature_path'])
+                    bg_df = pd.read_csv(feature_path).drop(columns=['label'], errors='ignore')
+                    # Align background to feature_order and cap size
+                    missing = [c for c in feature_order if c not in bg_df.columns]
+                    for m in missing:
+                        bg_df[m] = 0.0
+                    bg_df = bg_df[feature_order]
+                    bg_sample = bg_df.sample(min(200, len(bg_df)), random_state=42)
+                    # Try using SHAP kmeans background for better KernelExplainer performance
+                    try:
+                        if hasattr(shap, 'kmeans') and len(bg_sample) > 10:
+                            k = min(50, len(bg_sample))
+                            bg_kmeans = shap.kmeans(bg_sample.values, k)
+                            background = bg_kmeans
+                        else:
+                            background = bg_sample
+                    except Exception:
+                        background = bg_sample
+                except Exception:
+                    # Fallback to the single instance as minimal background
+                    background = df.copy()
+
+                def predict_fn(x):
+                    X = pd.DataFrame(x, columns=feature_order)
+                    Xp = _apply_preprocessing(X, model_package)
+                    if hasattr(estimator, 'predict_proba'):
+                        return estimator.predict_proba(Xp)
+                    # Fallback to decision_function or predict probabilities-like
+                    if hasattr(estimator, 'decision_function'):
+                        vals = estimator.decision_function(Xp)
+                        # Ensure 2D array
+                        return np.atleast_2d(vals)
+                    preds = estimator.predict(Xp)
+                    return np.atleast_2d(preds)
+
+                explainer = shap.KernelExplainer(predict_fn, background)
+
             with cache_lock:
                 EXPLAINER_CACHE[cache_key] = explainer
-                
-        shap_vals = explainer.shap_values(df)
-        if isinstance(shap_vals, list):
-            # Multi-class - aggregate absolute mean across classes
-            agg = np.mean(np.abs(np.array(shap_vals)), axis=0)[0]
-        else:
-            agg = np.abs(shap_vals[0])
-            
-        contrib = sorted([{ 'feature': f, 'importance': float(v)} for f, v in zip(feature_order, agg)], key=lambda x: -x['importance'])[:20]
-        return jsonify({'shap_values': contrib})
+
+        # Compute shap values for the processed instance
+        shap_vals = explainer.shap_values(df_processed)
+
+        # Extract signed shap values for the predicted class, and absolute importances
+        try:
+            if isinstance(shap_vals, list):
+                # List of arrays per class
+                idx = int(prediction) if int(prediction) < len(shap_vals) else 0
+                arr = np.asarray(shap_vals[idx])
+                signed = arr[0] if arr.ndim == 2 else arr.squeeze()
+            elif isinstance(shap_vals, np.ndarray):
+                if shap_vals.ndim == 3:
+                    signed = shap_vals[0, :, int(prediction)]
+                elif shap_vals.ndim == 2:
+                    signed = shap_vals[0, :]
+                else:
+                    signed = shap_vals.flatten()[:len(feature_order)]
+            else:
+                signed = np.asarray(shap_vals).flatten()[:len(feature_order)]
+
+            # Defensive alignment
+            if len(signed) != len(feature_order):
+                if isinstance(shap_vals, list) and len(shap_vals) > 0:
+                    arr = np.asarray(shap_vals[0])
+                    signed = (arr[0] if arr.ndim == 2 else arr.squeeze())[:len(feature_order)]
+                else:
+                    signed = signed[:len(feature_order)]
+        except Exception as e_extract:
+            print(f"[WARN] Failed to extract signed SHAP values: {e_extract}")
+            signed = np.zeros(len(feature_order), dtype=float)
+
+        agg = np.abs(signed)
+
+        # Create detailed feature contributions with actual values and interpretations
+        contrib = []
+        for f, importance, value, s in zip(feature_order, agg, data, signed):
+            interpretation = _get_feature_interpretation(f, importance, value)
+            contrib.append({
+                'feature': f,
+                'importance': float(importance),
+                'feature_value': float(value),
+                'interpretation': interpretation,
+                'shap_value': float(s)
+            })
+        
+        contrib.sort(key=lambda x: -x['importance'])
+        # Identify top positive/negative contributors based on signed SHAP
+        pos = [c for c in contrib if c['shap_value'] > 0]
+        neg = [c for c in contrib if c['shap_value'] < 0]
+        pos.sort(key=lambda x: -x['shap_value'])
+        neg.sort(key=lambda x: x['shap_value'])
+
+        # Base value for predicted class (where available)
+        try:
+            ev = explainer.expected_value
+            if isinstance(ev, (list, np.ndarray)):
+                base_value = float(ev[int(prediction)]) if int(prediction) < len(ev) else float(ev[0])
+            else:
+                base_value = float(ev)
+        except Exception:
+            base_value = None
+        
+        # Build response with context
+        response = {
+            'prediction': {
+                'class': int(prediction),
+                'label': label_map.get(int(prediction), f'Class {prediction}'),
+                'confidence': float(max(proba)) if proba is not None else None,
+                'is_attack': int(prediction) != 0
+            },
+            'shap_values': contrib[:20],
+            'top_attack_indicators': pos[:5],
+            'top_normal_indicators': neg[:5],
+            'base_value': base_value,
+            'summary': _generate_shap_summary(contrib[:10], label_map.get(int(prediction), 'Unknown'))
+        }
+        
+        return jsonify(response)
     except Exception as e:
-        return jsonify({'error': f'SHAP explanation failed: {e}'}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"[ERROR] LIME explanation failed: {error_details}")
+        return jsonify({
+            'error': f'LIME explanation failed: {str(e)}',
+            'hint': 'Try using a real sample from /preset/sample instead of zero-padded features',
+            'details': str(e)
+        }), 500
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"[ERROR] SHAP explanation failed: {error_details}")
+        return jsonify({
+            'error': f'SHAP explanation failed: {str(e)}',
+            'hint': 'Try using a real sample from /preset/sample instead of zero-padded features',
+            'details': str(e)
+        }), 500
 
 
-@app.route('/explain/lime', methods=['POST'])
+def _get_feature_interpretation(feature_name, importance, value):
+    """Generate human-readable interpretation of feature contribution"""
+    # Feature descriptions
+    descriptions = {
+        'sbytes': 'Source bytes transferred',
+        'dbytes': 'Destination bytes transferred',
+        'sload': 'Source bits per second',
+        'dload': 'Destination bits per second',
+        'dur': 'Connection duration',
+        'rate': 'Packet transmission rate',
+        'sttl': 'Source time-to-live value',
+        'dttl': 'Destination time-to-live value',
+        'ct_srv_dst': 'Connections to same service',
+        'ct_dst_src_ltm': 'Connections from destination',
+        'service_dns': 'DNS service activity',
+        'service_-': 'Unidentified service',
+        'proto_udp': 'UDP protocol usage',
+        'synack': 'SYN-ACK packet count',
+        'tcprtt': 'TCP round trip time',
+        'dpkts': 'Destination packet count',
+        'dloss': 'Destination packet loss',
+    }
+    
+    desc = descriptions.get(feature_name, feature_name.replace('_', ' ').title())
+    
+    # Determine strength
+    if importance > 0.1:
+        strength = "STRONG"
+    elif importance > 0.05:
+        strength = "MODERATE"
+    elif importance > 0.01:
+        strength = "WEAK"
+    else:
+        strength = "MINIMAL"
+    
+    # Contextualize value
+    if value == 0:
+        context = "absent"
+    elif value < 0.1:
+        context = "very low"
+    elif value < 0.3:
+        context = "low"
+    elif value < 0.7:
+        context = "moderate"
+    elif value < 0.9:
+        context = "high"
+    else:
+        context = "very high"
+    
+    return f"{desc} ({context}) - {strength} indicator"
+
+
+def _generate_shap_summary(top_features, threat_name):
+    """Generate textual summary of SHAP analysis"""
+    if not top_features:
+        return "No significant features identified"
+    
+    summary = f"Classification: {threat_name}\n\n"
+    summary += "Top contributing features:\n"
+    
+    for i, feat in enumerate(top_features[:5], 1):
+        summary += f"{i}. {feat['interpretation']} (importance: {feat['importance']:.4f})\n"
+    
+    return summary
+
+
+@app.route('/explain/lime', methods=['POST', 'GET'])
+@app.route('/explain/lime/', methods=['POST', 'GET'])
 def explain_lime():
+    if request.method == 'GET':
+        return jsonify({
+            'usage': 'POST JSON to /explain/lime',
+            'body': {'dataset': 'unsw', 'features': 'list[float]'},
+            'notes': 'Ensure Content-Type: application/json'
+        }), 200
     if LimeTabularExplainer is None:
         return jsonify({'error': 'LIME not installed'}), 500
+
     req_json = request.json or {}
     dataset = req_json.get('dataset')
     data = req_json.get('features')
     if not dataset or data is None:
         return jsonify({'error': 'dataset and features required'}), 400
+
+    # Load model & features
     m_tuple, feature_order, label_map, err = load_model_and_features(dataset)
     if err:
         return jsonify({'error': err}), 400
-    model, model_type = m_tuple
-    
+    model_package, model_type = m_tuple
+
     if model_type != 'sklearn':
         return jsonify({'error': 'LIME explanation only supported for sklearn models'}), 400
+
+    # Extract estimator
+    estimator = model_package.get('model') if isinstance(model_package, dict) else model_package
+
+    # Validate feature vector length first (with optional auto-pad)
+    expected_len = len(feature_order)
+    if not isinstance(data, (list, tuple)):
+        return jsonify({
+            'error': 'features must be a list of numeric values',
+            'expected_count': expected_len,
+            'received_count': 0,
+            'hint': f'Use /preset/sample endpoint to get valid feature vectors for dataset "{dataset}"'
+        }), 400
+    if len(data) != expected_len:
+        auto_pad = request.args.get('auto_pad', 'false').lower() in ('1', 'true', 'yes')
+        if auto_pad and len(data) < expected_len:
+            data = list(data) + [0.0] * (expected_len - len(data))
+        else:
+            return jsonify({
+                'error': f'Invalid features length: expected {expected_len}, got {len(data)}',
+                'expected_count': expected_len,
+                'received_count': len(data),
+                'hint': f'Use /preset/sample endpoint to get valid feature vectors for dataset "{dataset}", or add ?auto_pad=true to pad with zeros',
+                'sample_request': f'curl -X POST http://localhost:5000/preset/sample -H "Content-Type: application/json" -d \'{{"dataset":"{dataset}"}}\''
+            }), 400
+
+    # Background sample in RAW space; preprocessing applied inside predict_fn
+    try:
+        feature_path = _resolve_path(DATASETS[dataset]['feature_path'])
+        full_df = pd.read_csv(feature_path).drop(columns=['label'], errors='ignore')
+        # Align columns to feature_order, add any missing as zeros, cap size
+        missing = [c for c in feature_order if c not in full_df.columns]
+        for m in missing:
+            full_df[m] = 0.0
+        full_df = full_df[feature_order]
+        sample_bg = full_df.sample(min(500, len(full_df)), random_state=42)
+    except Exception as e:
+        return jsonify({'error': f'Failed to build LIME background: {e}'}), 500
+
+    # Build predict function that applies preprocessing to inputs
+    def predict_fn(x):
+        X = pd.DataFrame(x, columns=feature_order)
+        Xp = _apply_preprocessing(X, model_package)
+        if hasattr(estimator, 'predict_proba'):
+            return estimator.predict_proba(Xp)
+        if hasattr(estimator, 'decision_function'):
+            vals = estimator.decision_function(Xp)
+            return np.atleast_2d(vals)
+        preds = estimator.predict(Xp)
+        # Map to a two-class probability-like output if needed
+        preds = np.asarray(preds)
+        # Make a simple one-hot style matrix if shape not 2D
+        if preds.ndim == 1:
+            classes = sorted(set(int(v) for v in preds.tolist()))
+            k = max(max(classes) + 1, 2)
+            out = np.zeros((len(preds), k), dtype=float)
+            for i, v in enumerate(preds):
+                idx = int(v) if 0 <= int(v) < k else 0
+                out[i, idx] = 1.0
+            return out
+        return preds
+
+    # Get prediction for context
+    instance = np.array(data, dtype=np.float64)
+    df_instance = pd.DataFrame([instance], columns=feature_order)
+    df_processed = _apply_preprocessing(df_instance, model_package)
+    prediction = estimator.predict(df_processed)[0]
+    proba = None
+    if hasattr(estimator, 'predict_proba'):
+        proba = estimator.predict_proba(df_processed)[0]
+
+    # Cache explainer keyed by dataset, model class, and model mtime
+    try:
+        model_path_abs = _resolve_path(DATASETS[dataset]['model_path'])
+        model_mtime = int(os.path.getmtime(model_path_abs)) if os.path.exists(model_path_abs) else 0
+    except Exception:
+        model_mtime = 0
+    lime_cache_key = f"lime::{dataset}::{type(estimator).__name__}::{model_mtime}"
+    with cache_lock:
+        explainer = EXPLAINER_CACHE.get(lime_cache_key)
+    if explainer is None:
+        # Optional kmeans reduction for background
+        try:
+            if hasattr(shap, 'kmeans') and len(sample_bg) > 50:
+                k = min(100, len(sample_bg))
+                bg = shap.kmeans(sample_bg.values, k)
+            else:
+                bg = sample_bg.values
+        except Exception:
+            bg = sample_bg.values
+
+        explainer = LimeTabularExplainer(
+            bg,
+            feature_names=feature_order,
+            class_names=list(label_map.values()) if label_map else None,
+            discretize_continuous=False,
+            random_state=42
+        )
+        with cache_lock:
+            EXPLAINER_CACHE[lime_cache_key] = explainer
+
+    try:
+        exp = explainer.explain_instance(instance, predict_fn, num_features=15)
         
-    # For efficiency use a small background sample from feature file
-    feature_path = _resolve_path(DATASETS[dataset]['feature_path'])
-    full_df = pd.read_csv(feature_path).drop(columns=['label'])
-    sample_bg = full_df.sample(min(500, len(full_df)), random_state=42)
-    explainer = LimeTabularExplainer(sample_bg.values, feature_names=feature_order, class_names=list(label_map.values()), discretize_continuous=True, random_state=42)
-    instance = np.array(data)
+        # Extract explanation as list
+        explanation_list = exp.as_list(label=int(prediction))
+        
+        # Enhanced explanations with interpretations
+        detailed_explanations = []
+        for feature_condition, weight in explanation_list:
+            # Extract feature name from condition
+            parts = feature_condition.split()
+            feature_name = parts[0] if parts else feature_condition
+            
+            # Get feature value from instance
+            try:
+                feat_idx = feature_order.index(feature_name)
+                feat_value = float(instance[feat_idx])
+            except (ValueError, IndexError):
+                feat_value = None
+            
+            interpretation = _get_feature_interpretation(feature_name, abs(weight), feat_value if feat_value is not None else 0)
+            
+            detailed_explanations.append({
+                'feature': feature_name,
+                'condition': feature_condition,
+                'weight': float(weight),
+                'feature_value': feat_value,
+                'interpretation': interpretation,
+                'direction': 'attack' if weight > 0 else 'normal'
+            })
+        
+        response = {
+            'prediction': {
+                'class': int(prediction),
+                'label': label_map.get(int(prediction), f'Class {prediction}'),
+                'confidence': float(max(proba)) if proba is not None else None,
+                'is_attack': int(prediction) != 0
+            },
+            'lime_explanation': detailed_explanations,
+            'intercept': float(exp.intercept[int(prediction)]) if hasattr(exp, 'intercept') else None,
+            'raw_local_prediction': float(exp.local_pred[int(prediction)]) if hasattr(exp, 'local_pred') else None,
+            'summary': _generate_lime_summary(detailed_explanations[:5], label_map.get(int(prediction), 'Unknown'))
+        }
+        return jsonify(response)
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"[ERROR] LIME explanation failed: {error_details}")
+        return jsonify({
+            'error': f'LIME explanation failed: {str(e)}',
+            'hint': 'Try using a real sample from /preset/sample instead of zero-padded features',
+            'details': str(e)
+        }), 500
+
+
+def _generate_lime_summary(top_explanations, threat_name):
+    """Generate textual summary of LIME analysis"""
+    if not top_explanations:
+        return "No significant explanations identified"
     
-    if hasattr(model, 'predict_proba'):
-        predict_fn = model.predict_proba
-    else:
-        predict_fn = lambda x: np.eye(len(label_map))[model.predict(x)]
-        
-    exp = explainer.explain_instance(instance, predict_fn, num_features=15)
-    return jsonify({'lime_explanation': [{'feature': f, 'weight': float(w)} for f, w in exp.as_list()]})
+    summary = f"Classification: {threat_name}\n\n"
+    summary += "Key explanatory factors:\n"
+    
+    for i, exp in enumerate(top_explanations, 1):
+        direction = "increases" if exp['weight'] > 0 else "decreases"
+        summary += f"{i}. {exp['interpretation']}\n   Weight: {exp['weight']:.4f} ({direction} attack probability)\n"
+    
+    return summary
 
 
 @app.route('/incremental/update', methods=['POST'])
@@ -1284,19 +1800,12 @@ def predict_multi():
         
         preds = None
         probs_out = None
-        if mtype == 'sklearn':
-            if hasattr(model, 'predict_proba'):
-                probs = model.predict_proba(df_processed)
-                preds = probs.argmax(axis=1)
-                probs_out = [{str(i): float(p) for i,p in enumerate(row)} for row in probs]
-            else:
-                preds = model.predict(df_processed)
-        else:  # keras
-            x = df_processed.values.astype('float32')
-            x = x.reshape((x.shape[0], x.shape[1], 1))
-            probs = model.predict(x, verbose=0)
+        if hasattr(model, 'predict_proba'):
+            probs = model.predict_proba(df_processed)
             preds = probs.argmax(axis=1)
             probs_out = [{str(i): float(p) for i,p in enumerate(row)} for row in probs]
+        else:
+            preds = model.predict(df_processed)
         # Map label names if available from metrics class_weights keys length vs label_map
         # For now just numeric classes
         return jsonify({
@@ -1308,6 +1817,165 @@ def predict_multi():
         })
     except Exception as e:
         return jsonify({'error': f'Prediction failed: {e}'}), 500
+
+@app.route('/predict_batch', methods=['POST'])
+def predict_batch():
+    """
+    Run predictions across all available models for comparison.
+    Body: {"features": [list of feature values]}
+    Returns: {"results": [{"model_key": str, "prediction": int, "confidence": float, ...}]}
+    """
+    try:
+        req_json = request.json
+        if not req_json:
+            return jsonify({'error': 'Request body must be valid JSON.'}), 400
+            
+        features = req_json.get('features')
+        if not features or not isinstance(features, list):
+            return jsonify({'error': 'Request must include "features" (list).'}), 400
+        
+        # Validate feature count
+        if len(features) != len(GLOBAL_FEATURE_ORDER):
+            return jsonify({'error': f'Expected {len(GLOBAL_FEATURE_ORDER)} features, received {len(features)}.'}), 400
+        
+        # Validate feature values are numeric
+        try:
+            numeric_data = [float(x) for x in features]
+        except (ValueError, TypeError) as e:
+            return jsonify({'error': f'All feature values must be numeric. Error: {str(e)}'}), 400
+        
+        results = []
+        
+        # Run prediction on each available model
+        for model_key in MODEL_REGISTRY.keys():
+            try:
+                model_package, model_type = _load_model(model_key)
+                
+                # Extract actual model from package
+                if isinstance(model_package, dict) and 'model' in model_package:
+                    model = model_package['model']
+                else:
+                    model = model_package
+                
+                # Determine per-model feature list if available and align
+                model_features = None
+                if isinstance(model_package, dict):
+                    model_features = model_package.get('feature_names')
+                if model_features:
+                    if len(numeric_data) == len(model_features):
+                        df = pd.DataFrame([numeric_data], columns=model_features)
+                    else:
+                        # Try to map from global/dataset features
+                        source_names = GLOBAL_FEATURE_ORDER if len(GLOBAL_FEATURE_ORDER) == len(numeric_data) else None
+                        if not source_names:
+                            # Attempt dataset CSV for guessed dataset
+                            dataset_guess = 'unsw' if 'unsw' in model_key.lower() else ('cicids' if 'cicids' in model_key.lower() else DEFAULT_DATASET)
+                            entry = DATASETS.get(dataset_guess)
+                            base_csv_features = None
+                            if entry:
+                                try:
+                                    feat_df = pd.read_csv(_resolve_path(entry['feature_path']), nrows=1)
+                                    base_csv_features = [c for c in feat_df.columns if c != 'label']
+                                    if len(base_csv_features) == len(numeric_data):
+                                        source_names = base_csv_features
+                                except Exception:
+                                    pass
+                        if source_names:
+                            values_map = {name: val for name, val in zip(source_names, numeric_data)}
+                            aligned_row = [values_map.get(name, 0.0) for name in model_features]
+                            df = pd.DataFrame([aligned_row], columns=model_features)
+                        else:
+                            df = pd.DataFrame([numeric_data], columns=GLOBAL_FEATURE_ORDER)
+                else:
+                    # Fallback: use global order
+                    df = pd.DataFrame([numeric_data], columns=GLOBAL_FEATURE_ORDER)
+                
+                # Apply preprocessing if needed
+                df_processed = _apply_preprocessing(df, model_package)
+                
+                # Make prediction
+                prediction = model.predict(df_processed)[0]
+                
+                # Get confidence if available
+                confidence = None
+                if hasattr(model, 'predict_proba'):
+                    try:
+                        probs = model.predict_proba(df_processed)[0]
+                        confidence = float(np.max(probs))
+                    except Exception:
+                        pass
+                elif hasattr(model, 'decision_function'):
+                    try:
+                        decision = model.decision_function(df_processed)[0]
+                        if hasattr(decision, '__len__') and len(decision) > 1:
+                            confidence = float(np.max(decision))
+                        else:
+                            confidence = float(abs(decision))
+                    except Exception:
+                        pass
+                
+                # Guess dataset and get label mapping
+                if 'unsw' in model_key.lower():
+                    label_map = DATASETS.get('unsw', {}).get('label_map', {})
+                    dataset_guess = 'unsw'
+                elif 'cicids' in model_key.lower():
+                    label_map = DATASETS.get('cicids', {}).get('label_map', {})
+                    dataset_guess = 'cicids'
+                else:
+                    label_map = DATASETS.get(DEFAULT_DATASET, {}).get('label_map', {})
+                    dataset_guess = DEFAULT_DATASET
+                
+                threat_name = label_map.get(int(prediction), 'Unknown')
+                is_attack = bool(prediction != 0)
+                
+                # Extract algorithm name
+                algorithm_name = type(model).__name__
+                if 'XGB' in algorithm_name:
+                    algorithm_name = 'XGBoost'
+                elif 'LGBM' in algorithm_name or 'LightGBM' in algorithm_name:
+                    algorithm_name = 'LightGBM'
+                elif 'RandomForest' in algorithm_name:
+                    algorithm_name = 'Random Forest'
+                elif 'GradientBoosting' in algorithm_name:
+                    algorithm_name = 'Gradient Boosting'
+                elif 'ExtraTrees' in algorithm_name:
+                    algorithm_name = 'Extra Trees'
+                
+                results.append({
+                    'model_key': model_key,
+                    'algorithm': algorithm_name,
+                    'prediction': int(prediction),
+                    'threat': threat_name,
+                    'confidence': round(confidence, 4) if confidence else None,
+                    'is_attack': is_attack,
+                    'dataset': dataset_guess,
+                    'model_type': model_type
+                })
+                
+            except Exception as e:
+                print(f"[WARN] Batch prediction failed for model {model_key}: {e}")
+                results.append({
+                    'model_key': model_key,
+                    'algorithm': 'Unknown',
+                    'error': str(e),
+                    'prediction': None,
+                    'threat': None,
+                    'confidence': None,
+                    'is_attack': False,
+                    'dataset': None,
+                    'model_type': None
+                })
+        
+        return jsonify({
+            'results': results,
+            'total_models': len(results),
+            'successful_predictions': len([r for r in results if 'error' not in r]),
+            'feature_count': len(GLOBAL_FEATURE_ORDER)
+        })
+        
+    except Exception as e:
+        print(f"[ERROR] Batch prediction failed: {e}")
+        return jsonify({'error': f'Batch prediction failed: {str(e)}'}), 500
 
 if __name__ == '__main__':
     print("\nAI NIDS API starting...")

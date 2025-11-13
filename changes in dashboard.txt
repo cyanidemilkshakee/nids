@@ -1,0 +1,38 @@
+Model selection and state
+Move/duplicate model selector into header; sync with sidebar; show dataset badge and metrics tooltip.
+Persist last-used dataset/model and restored form values in localStorage.
+Empty/loading/error states
+Use skeletons for model cards, feature grid, and comparison list while fetching.
+Replace raw error text with friendly inline error components and retry actions.
+
+Visual analytics
+Add charts for probability distribution, confidence over time, and per-model comparison (bar/sparkline) using Chart.js or ECharts.
+SHAP/LIME visuals: waterfall/bar charts for top features; link bars to highlight corresponding inputs.
+
+ARIA live regions
+Announce prediction results and errors using aria-live polite/assertive near results.
+Keyboard and focus
+Ensure full keyboard flow (feature search, tabs, actions) with visible focus; escape closes slide-over.
+Optional opt‑in shortcuts in Settings (e.g., Enter to Predict, Alt+M model menu).
+
+Performance and resilience
+Perceived performance
+Virtualize large feature lists; debounce inputs; lazy load model grids/charts; prefetch on hover.
+Network resilience
+Offline indicator with retry/backoff UI; retain last result for context; compress/stream large responses if applicable.
+Web Workers (optional)
+Offload large chart transforms or client-side computations to avoid main-thread jank.
+
+
+
+
+
+
+
+
+
+Larger tap targets and form density toggle.
+
+Replace result block with a sticky badge + inline status ribbon; add aria-live.
+
+
