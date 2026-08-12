@@ -309,7 +309,11 @@ curl -X POST http://localhost:5000/predict -H "Content-Type: application/json" -
 4. Open PR with clear summary of changes
 
 ---
+
+
 ## 20. Summary
 This project delivers a pragmatic intrusion detection workflow centered on a RandomForest model with explainability, real-data presets, and a lightweight feedback loop. Extend it by adding multi-dataset support, production hardening (auth, DB, logging), and richer model serving layers as needed.
 
 Happy analyzing and stay secure.
+
+FastAPI + PostgreSQL (SQLAlchemy 2)
